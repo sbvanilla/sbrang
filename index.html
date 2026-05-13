@@ -1027,6 +1027,12 @@ function closeProfile() {
 }
 
 function buildRankChart(history) {
+    if (!document.getElementById('chartTip')) {
+        const tip = document.createElement('div');
+        tip.id = 'chartTip';
+        tip.style.cssText = 'display:none;position:fixed;background:#161b22;border:1px solid #2d333b;border-radius:9px;padding:10px 14px;font-family:Inter,sans-serif;pointer-events:none;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.5);transition:opacity .15s ease';
+        document.body.appendChild(tip);
+    }
     const W = 700, H = 220;
     const PAD = { top: 24, right: 24, bottom: 36, left: 48 };
     const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
@@ -1063,9 +1069,9 @@ function buildRankChart(history) {
     const circles = history.map((h, i) =>
         `<circle cx="${px(i).toFixed(1)}" cy="${py(h.rank).toFixed(1)}" r="5"
              fill="#58a6ff" stroke="#0d1117" stroke-width="2.5"
-             style="cursor:pointer;animation:popIn .4s cubic-bezier(.34,1.56,.64,1) ${(.15+i*.08).toFixed(2)}s both"
-             onmouseenter="showChartTip(event,'${h.date}',${h.rank},${h.points})"
-             onmouseleave="hideChartTip()"/>`
+             style="cursor:pointer;transition:r .15s ease,filter .15s ease;animation:popIn .4s cubic-bezier(.34,1.56,.64,1) ${(.15+i*.08).toFixed(2)}s both"
+             onmouseenter="this.setAttribute('r','8');this.style.filter='drop-shadow(0 0 8px rgba(88,166,255,.9))';showChartTip(this,'${h.date}',${h.rank},${h.points})"
+             onmouseleave="this.setAttribute('r','5');this.style.filter='none';hideChartTip()"/>`
     ).join('');
 
     return `<div style="position:relative">
@@ -1074,24 +1080,50 @@ function buildRankChart(history) {
             ${n > 1 ? `<polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" class="chart-anim"/>` : ''}
             ${grid}${xLabels}${circles}
         </svg>
-        <div id="chartTip" style="display:none;position:fixed;background:#161b22;border:1px solid #2d333b;border-radius:9px;padding:10px 14px;font-family:'Inter',sans-serif;pointer-events:none;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5)"></div>
     </div>`;
 }
 
-function showChartTip(e, date, rank, pts) {
-    const tt = document.getElementById('chartTip');
-    if (!tt) return;
+function showChartTip(circle, date, rank, pts) {
+    let tt = document.getElementById('chartTip');
+    if (!tt) {
+        tt = document.createElement('div');
+        tt.id = 'chartTip';
+        tt.style.cssText = 'display:none;position:fixed;background:#161b22;border:1px solid #2d333b;border-radius:9px;padding:10px 14px;font-family:Inter,sans-serif;pointer-events:none;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.5);transition:opacity .15s ease';
+        document.body.appendChild(tt);
+    }
     tt.innerHTML = `<div style="color:#7d8590;font-size:11px;margin-bottom:5px">${date}</div>
         <div style="font-weight:700;font-size:14px;margin-bottom:3px">#${rank} позиция</div>
         <div style="color:#58a6ff;font-size:13px">${parseInt(pts).toLocaleString('ru')} очков</div>`;
     tt.style.display = 'block';
-    tt.style.left = (e.clientX + 14) + 'px';
-    tt.style.top  = (e.clientY - 14) + 'px';
+    tt.style.opacity = '0';
+
+    const svg = circle.ownerSVGElement;
+    const ctm = svg.getScreenCTM();
+    const pt  = svg.createSVGPoint();
+    pt.x = parseFloat(circle.getAttribute('cx'));
+    pt.y = parseFloat(circle.getAttribute('cy'));
+    const sp = pt.matrixTransform(ctm);
+
+    requestAnimationFrame(() => {
+        const tw = tt.offsetWidth, th = tt.offsetHeight;
+        let left = sp.x + 14;
+        let top  = sp.y - th / 2;
+        if (left + tw > window.innerWidth - 8) left = sp.x - tw - 14;
+        if (top < 8) top = 8;
+        if (top + th > window.innerHeight - 8) top = window.innerHeight - th - 8;
+        tt.style.left    = left + 'px';
+        tt.style.top     = top  + 'px';
+        tt.style.opacity = '1';
+    });
 }
+
+function moveChartTip() {}
 
 function hideChartTip() {
     const tt = document.getElementById('chartTip');
-    if (tt) tt.style.display = 'none';
+    if (!tt) return;
+    tt.style.opacity = '0';
+    setTimeout(() => { tt.style.display = 'none'; }, 150);
 }
 
 // ═══════════════ ADMIN ═══════════════
