@@ -637,7 +637,12 @@
 <script>
 // ═══════════════ DATA ═══════════════
 
-const PASS = 'admin';
+const PASS_HASH = 'c89320024c60ea4bc011de6dfebc9389fa2b640103041250dc42a74c97239e50';
+
+async function sha256(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
 
 const firebaseConfig = {
     apiKey:            "AIzaSyA2pCDJ3efg18D3Q7f32dzyYNsB-pV-f80",
@@ -1046,8 +1051,9 @@ function renderAdmin() {
     }
 }
 
-function tryLogin() {
-    if (document.getElementById('passInput').value === PASS) {
+async function tryLogin() {
+    const hash = await sha256(document.getElementById('passInput').value);
+    if (hash === PASS_HASH) {
         adminIn = true; renderAdmin();
     } else {
         document.getElementById('adminErr').textContent = 'Неверный пароль!';
