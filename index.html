@@ -158,6 +158,7 @@
             border-color: rgba(193,127,36,.35);
             background: linear-gradient(110deg, rgba(193,127,36,.08) 0%, var(--card) 60%);
         }
+        .player-row.rank-3:hover { background: linear-gradient(110deg, rgba(193,127,36,.14) 0%, var(--card-hover) 60%); }
 
         /* rank badge */
         .rank-badge {
@@ -575,6 +576,56 @@
             .widgets-row { grid-template-columns: 1fr; }
         }
 
+        /* ─── RANK TABS ─── */
+        .rtab {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            padding: 7px 16px;
+            color: var(--muted);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .rtab:hover { background: var(--card); color: var(--text); }
+        .rtab.active { background: var(--card-hover); color: var(--text); border-color: var(--border2); }
+
+        /* ─── GROUP ROW (house / faction) ─── */
+        .group-row {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            transition: border-color .15s;
+        }
+        .group-row:hover { border-color: var(--border2); }
+        .group-row-head {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 18px;
+            cursor: pointer;
+        }
+        .group-row-body {
+            display: none;
+            padding: 0 18px 14px;
+            border-top: 1px solid var(--border);
+        }
+        .group-row.open .group-row-body { display: block; }
+        .group-member {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 7px 0;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+        .group-member:last-child { border-bottom: none; }
+        .group-member:hover .gm-name { color: var(--blue); }
+
         /* ─── MOBILE MAP LEGEND ─── */
         @media (max-width: 600px) {
             #mapLegendToggle { display: flex !important; align-items: center; justify-content: center; }
@@ -655,7 +706,31 @@
         </div>
         <p class="page-subtitle" id="pageSubtitle">Загрузка...</p>
         <div class="widgets-row" id="widgetsRow"></div>
+        <!-- Rank type tabs -->
+        <div style="display:flex;gap:6px;margin-bottom:16px">
+            <button id="rtab-players" class="rtab active" onclick="switchRankTab('players',this)">👤 Игроки</button>
+            <button id="rtab-houses"  class="rtab"        onclick="switchRankTab('houses',this)">🏠 Дома</button>
+            <button id="rtab-factions" class="rtab"       onclick="switchRankTab('factions',this)">🏴 Фракции</button>
+        </div>
         <div id="rankingsList"></div>
+    </div>
+
+    <!-- House detail view -->
+    <div id="houseDetailView" style="display:none">
+        <button class="profile-back" onclick="closeEntityDetail()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
+            Назад к домам
+        </button>
+        <div id="houseDetailContent"></div>
+    </div>
+
+    <!-- Faction detail view -->
+    <div id="factionDetailView" style="display:none">
+        <button class="profile-back" onclick="closeEntityDetail()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
+            Назад к фракциям
+        </button>
+        <div id="factionDetailContent"></div>
     </div>
 
     <!-- News view -->
@@ -835,12 +910,52 @@ const DEFAULTS = [
     { id:28, username:'mayaron1',    title:'Стремительный Чад',   subtitle:'Только начинает путь',         points:1000, change:3,  tag:'',     tagColor:'' },
 ];
 
-let players    = [];
-let news       = [];
-let mapData    = {};
+let players      = [];
+let news         = [];
+let mapData      = {};
+let regionCustom  = {}; // { regionId: { house?, capital?, color? } }
+let houseLeaders  = {}; // { "HouseName": playerId }
+let _mapNavFn     = null; // set by _setupPanZoom, used for programmatic animated navigation
+let currentEntityTab = 'houses'; // which entity detail we came from
 let adminIn    = false;
 let editId     = null;
 let newsEditId = null;
+
+// Merge default region data with admin overrides
+function getRegionData(id) {
+    const base   = MAP_REGIONS.find(r => r.id === id);
+    if (!base) return null;
+    const custom = regionCustom[id] || {};
+    const color  = custom.color || base.color;
+    // Derive hover/stroke from custom color if set
+    const hoverColor  = custom.color ? _shiftColor(custom.color, 1.35) : base.hoverColor;
+    const strokeColor = custom.color ? _shiftColor(custom.color, 2.8)  : base.strokeColor;
+    return { ...base, house: custom.house ?? base.house, capital: custom.capital ?? base.capital, color, hoverColor, strokeColor };
+}
+
+function _shiftColor(hex, factor) {
+    const clamp = v => Math.min(255, Math.max(0, Math.round(v)));
+    const r = clamp(parseInt(hex.slice(1,3),16) * factor);
+    const g = clamp(parseInt(hex.slice(3,5),16) * factor);
+    const b = clamp(parseInt(hex.slice(5,7),16) * factor);
+    return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+
+function saveRegionsConfig() { db.ref('mapData/regionsConfig').set(regionCustom); }
+function saveHouseLeaders()  { db.ref('mapData/houseLeaders').set(houseLeaders); }
+
+function updateRegionColors() {
+    if (!_mapSvgEl) return;
+    MAP_REGIONS.forEach(region => {
+        const r     = getRegionData(region.id);
+        const svgId = SVG_ID_MAP[region.id];
+        const el    = _mapSvgEl ? _mapSvgEl.querySelector('#' + svgId) : null;
+        if (!el) return;
+        const paths = el.tagName.toLowerCase() === 'g' ? el.querySelectorAll('path') : [el];
+        paths.forEach(p => { p.style.fill = r.color; });
+    });
+    buildMapLegend();
+}
 
 // ═══════════════ INIT + FIREBASE SYNC ═══════════════
 
@@ -865,6 +980,12 @@ db.ref('/').on('value', snap => {
         MAP_CITIES = Array.isArray(d.mapData.citiesConfig)
             ? d.mapData.citiesConfig.filter(Boolean)
             : Object.values(d.mapData.citiesConfig).filter(Boolean);
+    }
+    if (d.mapData && d.mapData.regionsConfig) {
+        regionCustom = d.mapData.regionsConfig;
+    }
+    if (d.mapData && d.mapData.houseLeaders) {
+        houseLeaders = d.mapData.houseLeaders;
     }
     if (document.querySelector('.overlay.open')) return;
     render();
@@ -950,12 +1071,337 @@ function render(q = '') {
 
 function filterRankings() { render(document.getElementById('searchInput').value.trim()); }
 
+// ══════════════ RANK TAB SWITCHER ══════════════
+let currentRankTab = 'players';
+
+function switchRankTab(tab, btn) {
+    currentRankTab = tab;
+    document.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    const sw = document.getElementById('searchWrap');
+    sw.style.visibility    = tab === 'players' ? '' : 'hidden';
+    sw.style.pointerEvents = tab === 'players' ? '' : 'none';
+    if (tab === 'players')  { render(); }
+    if (tab === 'houses')   { renderHousesRanking(); }
+    if (tab === 'factions') { renderFactionsRanking(); }
+    // Fade-in animation for the list
+    const list = document.getElementById('rankingsList');
+    list.style.animation = 'none'; void list.offsetWidth;
+    list.style.animation = 'fadeUp .28s ease both';
+}
+
+function closeEntityDetail() {
+    switchView('rankings');
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'rankings'));
+    const tabBtn = document.getElementById('rtab-' + currentEntityTab);
+    if (tabBtn) switchRankTab(currentEntityTab, tabBtn);
+}
+
+// ── House helpers ─────────────────────────────────────────────────────────────
+function buildHouseStats() {
+    const sorted = getSorted();
+    const map = {};
+    players.forEach(p => {
+        if (!p.house) return;
+        const key = p.house.trim();
+        if (!map[key]) map[key] = { name: key, factionId: p.factionId || null, members: [], total: 0 };
+        map[key].members.push(p);
+        map[key].total += p.points || 0;
+    });
+    // Sort members by points within each house
+    Object.values(map).forEach(h => h.members.sort((a,b)=>(b.points||0)-(a.points||0)));
+    return Object.values(map).sort((a,b) => b.total - a.total);
+}
+
+function getHouseHoldings(memberIds) {
+    const set = new Set(memberIds.map(Number));
+    const h = [];
+    MAP_REGIONS.forEach(r => {
+        if (set.has(Number(mapData[r.id]))) {
+            const rd = getRegionData(r.id);
+            h.push({ label: rd.emoji + ' ' + rd.name, type: 'region', id: r.id });
+        }
+    });
+    MAP_CITIES.forEach(c => {
+        if (set.has(Number(cityData[c.id])))
+            h.push({ label: (c.isCapital ? '👑' : '🏙') + ' ' + c.name, type: 'city', id: c.id });
+    });
+    return h;
+}
+
+function renderHousesRanking() {
+    const list   = document.getElementById('rankingsList');
+    const houses = buildHouseStats();
+    const sorted = getSorted();
+
+    if (!houses.length) {
+        list.innerHTML = `<div class="no-res">Дома появятся после назначения игрокам поля «Дом» в профиле</div>`;
+        return;
+    }
+
+    list.innerHTML = houses.map((h, idx) => {
+        const rank   = idx + 1;
+        const frd    = h.factionId ? getRegionData(h.factionId) : null;
+        const bClass = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'';
+        const rClass = rank===1?'rank-1':rank===2?'rank-2':rank===3?'rank-3':'';
+        const leaderId = houseLeaders[h.name];
+        const leader   = leaderId ? players.find(p=>p.id==leaderId) : h.members[0];
+
+        return `<div class="player-row ${rClass}" data-house="${esc(h.name)}" onclick="openHouseDetail(this.dataset.house)" style="animation-delay:${idx*0.04}s">
+            <div class="rank-badge ${bClass}">${rank}</div>
+            <div style="font-size:30px;flex-shrink:0;width:50px;text-align:center">${frd ? frd.emoji : '🏠'}</div>
+            <div class="player-info">
+                <div class="name-row">
+                    <span class="player-name">${esc(h.name)}</span>
+                    ${frd ? `<span style="font-size:11px;background:${frd.color}22;color:${frd.strokeColor};border:1px solid ${frd.color}44;border-radius:4px;padding:2px 7px;font-weight:700">${esc(frd.name)}</span>` : ''}
+                </div>
+                <div class="player-sub">${h.members.length} участников${leader ? ' · ⚔️ ' + esc(leader.username) : ''}</div>
+            </div>
+            <div class="player-points">
+                <span class="pts-val">${Number(h.total).toLocaleString('ru')}</span>
+                <span class="pts-label">очков</span>
+            </div>
+            <svg class="row-arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </div>`;
+    }).join('');
+}
+
+// ── Faction ranking ───────────────────────────────────────────────────────────
+function buildFactionStats() {
+    const sorted = getSorted();
+    const houses = buildHouseStats();
+    return MAP_REGIONS.map(region => {
+        const rd       = getRegionData(region.id);
+        const members  = players.filter(p => p.factionId === region.id);
+        const total    = members.reduce((s,p)=>s+(p.points||0),0);
+        const fHouses  = houses.filter(h=>h.factionId===region.id);
+        const leader   = mapData[region.id] ? players.find(p=>p.id==mapData[region.id]) : null;
+        const lrank    = leader ? sorted.indexOf(leader)+1 : null;
+        const holdings = [];
+        MAP_CITIES.forEach(c => {
+            if (cityData[c.id] && members.some(m=>m.id==cityData[c.id]))
+                holdings.push({ label: (c.isCapital?'👑':'🏙')+' '+c.name, type:'city', id: c.id });
+        });
+        return { region, rd, members, total, fHouses, leader, lrank, holdings };
+    }).sort((a,b)=>b.total-a.total);
+}
+
+function renderFactionsRanking() {
+    const list     = document.getElementById('rankingsList');
+    const factions = buildFactionStats();
+
+    const anyData = factions.some(f=>f.members.length>0);
+    if (!anyData) {
+        list.innerHTML = `<div class="no-res">Назначьте игрокам фракцию в профиле</div>`;
+        return;
+    }
+
+    list.innerHTML = factions.map((f, idx) => {
+        const rank   = idx + 1;
+        const bClass = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'';
+        const rClass = rank===1?'rank-1':rank===2?'rank-2':rank===3?'rank-3':'';
+
+        return `<div class="player-row ${rClass}" onclick="openFactionDetail('${f.region.id}')" style="animation-delay:${idx*0.04}s">
+            <div class="rank-badge ${bClass}">${rank}</div>
+            <div style="font-size:30px;flex-shrink:0;width:50px;text-align:center">${f.rd.emoji}</div>
+            <div class="player-info">
+                <div class="name-row">
+                    <span class="player-name">${esc(f.rd.name)}</span>
+                </div>
+                <div class="player-sub">${esc(f.rd.house)} · ${f.fHouses.length} домов · ${f.members.length} участников${f.leader ? ' · ⚔️ ' + esc(f.leader.username) : ''}</div>
+            </div>
+            <div class="player-points">
+                <span class="pts-val">${Number(f.total).toLocaleString('ru')}</span>
+                <span class="pts-label">очков</span>
+            </div>
+            <svg class="row-arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </div>`;
+    }).join('');
+}
+
 // ═══════════════ TABS ═══════════════
 
 function switchTab(tab) {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     switchView(tab);
     if (tab === 'news') renderNews();
+}
+
+// ══════════════ PLAYER ROLE HELPERS ══════════════
+
+function getPlayerLeaderRoles(playerId) {
+    const roles = [];
+    MAP_REGIONS.forEach(r => {
+        if (mapData[r.id] == playerId) {
+            const rd = getRegionData(r.id);
+            roles.push({ icon: rd.emoji, label: 'Лидер фракции', name: rd.name, type: 'region', id: r.id });
+        }
+    });
+    MAP_CITIES.forEach(c => {
+        if (cityData[c.id] == playerId) {
+            // Capital city leader = same as faction leader, already shown
+            if (!c.isCapital) roles.push({ icon: '🏙', label: 'Лидер города', name: c.name, type: 'city', id: c.id });
+        }
+    });
+    return roles;
+}
+
+const RP_TIER_LABELS = ['', 'Легенда', 'Ветеран', 'Средний', 'Новичок', 'Аутсайдер'];
+const RP_TIER_COLORS = ['', '#f5c842', '#3fb950', '#58a6ff', '#f0a500', '#f85149'];
+
+function rpTierBadge(tier) {
+    if (!tier) return '';
+    const t = Math.min(5, Math.max(1, tier));
+    return `<span title="RP Tier ${t}: ${RP_TIER_LABELS[t]}" style="background:${RP_TIER_COLORS[t]}22;color:${RP_TIER_COLORS[t]};border:1px solid ${RP_TIER_COLORS[t]}44;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700">T${t}</span>`;
+}
+
+// ══════════════ WIKI / ENCYCLOPEDIA ══════════════
+
+function renderWiki() {
+    const sorted = getSorted();
+
+    // Build faction stats
+    const factionStats = MAP_REGIONS.map(region => {
+        const rd      = getRegionData(region.id);
+        const members = players.filter(p => p.factionId === region.id);
+        const total   = members.reduce((s, p) => s + (p.points || 0), 0);
+        const leader  = mapData[region.id] ? players.find(p => p.id == mapData[region.id]) : null;
+        const lrank   = leader ? sorted.indexOf(leader) + 1 : null;
+        return { region, rd, members, total, leader, lrank };
+    }).sort((a, b) => b.total - a.total);
+
+    // Build house stats
+    const houseMap = {};
+    players.forEach(p => {
+        if (!p.house) return;
+        const key = p.house.trim();
+        if (!houseMap[key]) houseMap[key] = { name: key, factionId: p.factionId, members: [], total: 0 };
+        houseMap[key].members.push(p);
+        houseMap[key].total += p.points || 0;
+    });
+    const houseStats = Object.values(houseMap).sort((a, b) => b.total - a.total);
+
+    const inputSt = 'background:var(--bg);border:1px solid var(--border2);border-radius:7px;padding:5px 10px;color:var(--text);font-family:Inter,sans-serif;font-size:12.5px;outline:none';
+
+    document.getElementById('wikiContent').innerHTML = `
+    <div style="max-width:820px;margin:0 auto;padding:32px 20px 80px">
+        <div style="margin-bottom:28px">
+            <h2 style="font-size:20px;font-weight:800;margin:0 0 4px">📖 Энциклопедия</h2>
+            <div style="font-size:13px;color:var(--muted)">Фракции, дома и игроки мира SB Vanilla Chads</div>
+        </div>
+
+        <!-- Sections tabs -->
+        <div style="display:flex;gap:6px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:12px">
+            <button onclick="showWikiSection('factions',this)" class="wiki-tab active" style="background:var(--card-hover);border:1px solid var(--border2);border-radius:8px;padding:6px 16px;color:var(--text);font-family:Inter,sans-serif;font-size:13px;font-weight:600;cursor:pointer">🏴 Фракции</button>
+            <button onclick="showWikiSection('houses',this)" class="wiki-tab" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 16px;color:var(--muted);font-family:Inter,sans-serif;font-size:13px;font-weight:600;cursor:pointer">🏠 Дома</button>
+            <button onclick="showWikiSection('players',this)" class="wiki-tab" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 16px;color:var(--muted);font-family:Inter,sans-serif;font-size:13px;font-weight:600;cursor:pointer">👤 Игроки</button>
+        </div>
+
+        <!-- Factions section -->
+        <div id="wikiSectionFactions">
+            <div style="display:grid;gap:12px">
+            ${factionStats.map((fs, idx) => {
+                const rank = idx + 1;
+                const membersHTML = fs.members.length
+                    ? fs.members.map(m => {
+                        const mr = sorted.indexOf(m) + 1;
+                        const roles = getPlayerLeaderRoles(m.id);
+                        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openDetail(${m.id});switchTab('rankings')">
+                            <img src="https://mc-heads.net/avatar/${enc(m.username)}/24" style="width:24px;height:24px;border-radius:4px" onerror="this.src='https://minotar.net/helm/${enc(m.username)}/24'">
+                            <div style="flex:1;min-width:0">
+                                <div style="font-size:12.5px;font-weight:600">${esc(m.username)} ${m.house ? `<span style="color:var(--muted);font-weight:400;font-size:11px">· ${esc(m.house)}</span>` : ''}</div>
+                                ${roles.length ? `<div style="font-size:10.5px;color:#e6b84a">${roles.map(r=>r.icon+' '+r.name).join(' · ')}</div>` : ''}
+                            </div>
+                            <div style="font-size:11.5px;color:var(--muted)">#${mr} · ${Number(m.points).toLocaleString('ru')}</div>
+                        </div>`;
+                    }).join('')
+                    : `<div style="font-size:12px;color:var(--muted);padding:8px 0;font-style:italic">Нет участников</div>`;
+
+                return `<div style="background:var(--card);border:1px solid var(--border);border-radius:13px;overflow:hidden">
+                    <div style="padding:16px 18px;border-left:4px solid ${fs.rd.strokeColor};cursor:pointer;display:flex;align-items:center;gap:14px" onclick="this.closest('div[id]')||this.parentElement.querySelector('.wiki-faction-body').classList.toggle('hidden')">
+                        <div style="font-size:26px;width:38px;text-align:center">${fs.rd.emoji}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:14px;font-weight:800">${esc(fs.rd.name)}</div>
+                            <div style="font-size:11.5px;color:var(--muted)">${esc(fs.rd.house)} · 🏰 ${esc(fs.rd.capital)}</div>
+                        </div>
+                        <div style="text-align:right;flex-shrink:0">
+                            <div style="font-size:16px;font-weight:800;color:${rank<=3?'#f5c842':'var(--text)'}">#${rank}</div>
+                            <div style="font-size:11px;color:var(--muted)">${Number(fs.total).toLocaleString('ru')} очков</div>
+                        </div>
+                    </div>
+                    <div class="wiki-faction-body" style="padding:0 18px 14px;border-top:1px solid var(--border)">
+                        <div style="display:flex;gap:16px;margin:10px 0 10px;font-size:11.5px;color:var(--muted)">
+                            <span>👥 ${fs.members.length} участников</span>
+                            ${fs.leader ? `<span style="color:#58a6ff">⚔️ Лидер: #${fs.lrank} ${esc(fs.leader.username)}</span>` : '<span>⚔️ Лидер не назначен</span>'}
+                        </div>
+                        ${membersHTML}
+                    </div>
+                </div>`;
+            }).join('')}
+            </div>
+        </div>
+
+        <!-- Houses section -->
+        <div id="wikiSectionHouses" style="display:none">
+            ${houseStats.length ? `<div style="display:grid;gap:10px">
+            ${houseStats.map((h, idx) => {
+                const frd = h.factionId ? getRegionData(h.factionId) : null;
+                return `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px">
+                    <div style="font-size:22px">${frd ? frd.emoji : '🏠'}</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13.5px;font-weight:800">${esc(h.name)}</div>
+                        <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${frd ? esc(frd.name) : 'Нет фракции'} · ${h.members.length} участников</div>
+                        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+                            ${h.members.sort((a,b)=>(b.points||0)-(a.points||0)).map(m => {
+                                const mr = sorted.indexOf(m)+1;
+                                return `<span onclick="openDetail(${m.id});switchTab('rankings')" style="background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:2px 8px;font-size:11.5px;cursor:pointer">#${mr} ${esc(m.username)}</span>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0">
+                        <div style="font-size:15px;font-weight:800;color:${idx<3?'#f5c842':'var(--text)'}">#${idx+1}</div>
+                        <div style="font-size:11px;color:var(--muted)">${Number(h.total).toLocaleString('ru')} очков</div>
+                    </div>
+                </div>`;
+            }).join('')}
+            </div>` : `<div style="text-align:center;padding:60px 20px;color:var(--muted)">Дома появятся после назначения игрокам поля «Дом» в профиле</div>`}
+        </div>
+
+        <!-- Players section -->
+        <div id="wikiSectionPlayers" style="display:none">
+            <div style="display:grid;gap:8px">
+            ${sorted.map((p, idx) => {
+                const rank = idx + 1;
+                const frd  = p.factionId ? getRegionData(p.factionId) : null;
+                const roles = getPlayerLeaderRoles(p.id);
+                return `<div style="background:var(--card);border:1px solid var(--border);border-radius:11px;padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="openDetail(${p.id});switchTab('rankings')">
+                    <div style="font-size:14px;font-weight:800;color:${rank<=3?'#f5c842':'var(--muted)'};min-width:28px;text-align:center">#${rank}</div>
+                    <img src="https://mc-heads.net/avatar/${enc(p.username)}/36" style="width:36px;height:36px;border-radius:7px" onerror="this.src='https://minotar.net/helm/${enc(p.username)}/36'">
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:700">${esc(p.username)} ${p.rpTier ? rpTierBadge(p.rpTier) : ''}</div>
+                        <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+                            ${frd ? frd.emoji+' '+esc(frd.name) : ''}
+                            ${p.house ? ' · 🏠 '+esc(p.house) : ''}
+                            ${roles.length ? ' · '+roles.map(r=>r.icon+' '+r.name).join(', ') : ''}
+                        </div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;font-size:12.5px;color:var(--muted)">${Number(p.points).toLocaleString('ru')}</div>
+                </div>`;
+            }).join('')}
+            </div>
+        </div>
+    </div>`;
+}
+
+function showWikiSection(section, btn) {
+    ['factions','houses','players'].forEach(s => {
+        document.getElementById('wikiSection'+s.charAt(0).toUpperCase()+s.slice(1)).style.display = s===section?'':'none';
+    });
+    document.querySelectorAll('.wiki-tab').forEach(t => {
+        t.style.background = t===btn ? 'var(--card-hover)' : 'none';
+        t.style.color      = t===btn ? 'var(--text)' : 'var(--muted)';
+        t.style.border     = t===btn ? '1px solid var(--border2)' : '1px solid var(--border)';
+    });
 }
 
 // close region / city popups on body click
@@ -971,10 +1417,12 @@ document.addEventListener('click', e => {
 });
 
 function switchView(view) {
-    document.getElementById('rankingsView').style.display = view === 'rankings' ? '' : 'none';
-    document.getElementById('newsView').style.display     = view === 'news'     ? '' : 'none';
-    document.getElementById('profileView').style.display  = view === 'profile'  ? '' : 'none';
-    document.getElementById('mapView').style.display      = view === 'map'      ? '' : 'none';
+    document.getElementById('rankingsView').style.display     = view === 'rankings'     ? '' : 'none';
+    document.getElementById('newsView').style.display         = view === 'news'         ? '' : 'none';
+    document.getElementById('profileView').style.display      = view === 'profile'      ? '' : 'none';
+    document.getElementById('mapView').style.display          = view === 'map'          ? '' : 'none';
+    document.getElementById('houseDetailView').style.display  = view === 'houseDetail'  ? '' : 'none';
+    document.getElementById('factionDetailView').style.display = view === 'factionDetail' ? '' : 'none';
 
     closeRegionPopup();
     closeCityPopup();
@@ -1119,12 +1567,47 @@ function renderProfileTab(tab, p, rank) {
         const chColor = p.change > 0 ? 'var(--green)' : p.change < 0 ? 'var(--red)' : 'var(--muted)';
         const chText  = p.change > 0 ? `↑ +${p.change} позиции` : p.change < 0 ? `↓ ${p.change} позиции` : 'Без изменений';
         const status  = rank===1 ? '👑 Чемпион' : rank<=3 ? '🔥 Топ-3' : rank<=10 ? '⚡ Топ-10' : '🏅 Участник';
+        const frd   = p.factionId ? getRegionData(p.factionId) : null;
+        const roles = getPlayerLeaderRoles(p.id);
+        const rpInfoHTML = (p.character || frd || p.house || p.rpTier || roles.length) ? `
+            <div class="profile-section" style="animation:fadeUp .35s ease .04s both;margin-bottom:12px">
+                <h3>RP-профиль</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    ${p.character ? `<div class="stat-box"><div class="stat-lbl">Персонаж</div><div class="stat-val" style="font-size:13px">${esc(p.character)}</div></div>` : ''}
+                    ${p.rpTier   ? `<div class="stat-box"><div class="stat-lbl">RP Tier</div><div class="stat-val">${rpTierBadge(p.rpTier)}</div></div>` : ''}
+                    ${frd ? `<div class="stat-box" style="cursor:pointer;transition:border-color .15s,background .15s" onclick="openFactionDetail('${frd.id}')"
+                        onmouseenter="this.style.borderColor='var(--blue)';this.style.background='rgba(88,166,255,.05)'"
+                        onmouseleave="this.style.borderColor='';this.style.background=''">
+                        <div class="stat-lbl">Фракция</div>
+                        <div class="stat-val" style="font-size:13px;display:flex;align-items:center;gap:5px">${frd.emoji} ${esc(frd.name)}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" style="margin-left:auto;flex-shrink:0"><path d="m9 18 6-6-6-6"/></svg></div>
+                    </div>` : ''}
+                    ${p.house ? `<div class="stat-box" data-house="${esc(p.house)}" style="cursor:pointer;transition:border-color .15s,background .15s" onclick="openHouseDetail(this.dataset.house)"
+                        onmouseenter="this.style.borderColor='var(--blue)';this.style.background='rgba(88,166,255,.05)'"
+                        onmouseleave="this.style.borderColor='';this.style.background=''">
+                        <div class="stat-lbl">Дом</div>
+                        <div class="stat-val" style="font-size:13px;display:flex;align-items:center;gap:5px">🏠 ${esc(p.house)}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" style="margin-left:auto;flex-shrink:0"><path d="m9 18 6-6-6-6"/></svg></div>
+                    </div>` : ''}
+                </div>
+                ${roles.length ? `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">
+                    ${roles.map(r => {
+                        const nav = r.type === 'region' ? `navigateMapToRegion('${r.id}')` : `navigateMapToCity('${r.id}')`;
+                        return `<div onclick="${nav}" title="Открыть на карте"
+                            style="display:inline-flex;align-items:center;gap:6px;background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.3);border-radius:8px;padding:5px 12px;font-size:12px;color:#e6b84a;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s"
+                            onmouseenter="this.style.background='rgba(212,160,23,.22)';this.style.borderColor='rgba(212,160,23,.55)'"
+                            onmouseleave="this.style.background='rgba(212,160,23,.1)';this.style.borderColor='rgba(212,160,23,.3)'"
+                            >${r.icon} ${r.label}: ${esc(r.name)}
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity:.7;flex-shrink:0"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                            </div>`;
+                    }).join('')}
+                </div>` : ''}
+            </div>` : '';
         content.innerHTML = `
             <div class="profile-section" style="margin-bottom:12px;animation:fadeUp .35s ease both">
                 <h3>Биография</h3>
                 ${p.bio ? `<div class="profile-bio">${esc(p.bio)}</div>` : '<div class="profile-bio-empty">Биография не добавлена</div>'}
             </div>
-            <div class="profile-section" style="animation:fadeUp .35s ease .08s both">
+            ${rpInfoHTML}
+            <div class="profile-section" style="animation:fadeUp .35s ease .12s both">
                 <h3>Статистика</h3>
                 <div class="stats-grid">
                     <div class="stat-box" style="animation-delay:.05s"><div class="stat-lbl">Очки</div><div class="stat-val" id="_pPts">0</div></div>
@@ -1164,6 +1647,249 @@ function switchProfileTab(tab, btn) {
 function closeProfile() {
     switchView('rankings');
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'rankings'));
+}
+
+// ═══════════════ HOUSE DETAIL VIEW ═══════════════
+
+function openHouseDetail(houseName) {
+    currentEntityTab = 'houses';
+    const houses = buildHouseStats();
+    const sorted = getSorted();
+    const hIdx   = houses.findIndex(h => h.name === houseName);
+    if (hIdx < 0) return;
+    const h      = houses[hIdx];
+    const rank   = hIdx + 1;
+    const bClass = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'def';
+    const frd    = h.factionId ? getRegionData(h.factionId) : null;
+
+    const leaderId = houseLeaders[houseName];
+    const leader   = leaderId ? players.find(p=>p.id==leaderId) : h.members[0];
+    const lrank    = leader ? sorted.indexOf(leader)+1 : null;
+    const holdings = getHouseHoldings(h.members.map(m=>m.id));
+
+    const membersHTML = h.members.map(m => {
+        const mr    = sorted.indexOf(m)+1;
+        const roles = getPlayerLeaderRoles(m.id);
+        const isLdr = leader && m.id === leader.id;
+        return `<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;border-radius:8px;padding-left:4px;padding-right:4px"
+            onclick="closeEntityDetail();openDetail(${m.id})"
+            onmouseenter="this.style.background='var(--card-hover)'"
+            onmouseleave="this.style.background='transparent'">
+            <div style="font-size:13px;font-weight:800;color:${mr<=3?'#f5c842':'var(--muted)'};min-width:26px;text-align:center">#${mr}</div>
+            <img src="https://mc-heads.net/avatar/${enc(m.username)}/36" style="width:36px;height:36px;border-radius:7px;flex-shrink:0" onerror="this.src='https://minotar.net/helm/${enc(m.username)}/36'">
+            <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700">${esc(m.username)} ${m.rpTier?rpTierBadge(m.rpTier):''} ${isLdr?'<span style="font-size:10.5px;background:rgba(212,160,23,.15);color:#e6b84a;border:1px solid rgba(212,160,23,.3);border-radius:5px;padding:1px 6px">⚔️ Лидер</span>':''}</div>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:1px">${m.character?esc(m.character)+'':''} ${roles.length?'· '+roles.map(r=>r.icon+' '+r.name).join(', '):''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:13px;font-weight:700">${Number(m.points).toLocaleString('ru')}</div>
+                <div style="font-size:10.5px;color:var(--muted)">очков</div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </div>`;
+    }).join('');
+
+    document.getElementById('houseDetailContent').innerHTML = `
+        <!-- Header -->
+        <div style="display:flex;gap:24px;align-items:flex-start;margin-bottom:28px">
+            <div style="position:relative;flex-shrink:0">
+                <div style="width:90px;height:90px;background:var(--card);border:1px solid var(--border2);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:46px">${frd?frd.emoji:'🏠'}</div>
+                <div class="profile-rank-ovl ${bClass}" style="font-size:15px">${rank}</div>
+            </div>
+            <div style="flex:1;min-width:0;padding-top:4px">
+                <div style="font-size:26px;font-weight:800;letter-spacing:-.4px;margin-bottom:5px">${esc(h.name)}</div>
+                ${frd ? `<div style="font-size:13px;color:var(--muted2);margin-bottom:10px">${frd.emoji} ${esc(frd.name)}</div>` : '<div style="height:4px"></div>'}
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <span style="background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.25);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--blue)">👥 ${h.members.length} участников</span>
+                    ${holdings.length?`<span style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:6px;padding:3px 10px;font-size:12px;color:#e6b84a">🏰 ${holdings.length} владений</span>`:''}
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats row -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">
+            <div class="stat-box"><div class="stat-lbl">Место</div><div class="stat-val">#${rank}</div></div>
+            <div class="stat-box"><div class="stat-lbl">Очков</div><div class="stat-val" id="_hPts">0</div></div>
+            <div class="stat-box"><div class="stat-lbl">Участников</div><div class="stat-val">${h.members.length}</div></div>
+        </div>
+
+        <!-- Leader -->
+        ${leader ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .05s both">
+            <h3 style="margin-bottom:12px">⚔️ Лидер дома</h3>
+            <div style="display:flex;align-items:center;gap:14px;cursor:pointer;border-radius:10px;padding:8px;margin:-8px;transition:background .15s"
+                onclick="closeEntityDetail();openDetail(${leader.id})"
+                onmouseenter="this.style.background='var(--card-hover)'"
+                onmouseleave="this.style.background='transparent'">
+                <img src="https://mc-heads.net/avatar/${enc(leader.username)}/50"
+                     style="width:50px;height:50px;border-radius:10px;flex-shrink:0"
+                     onerror="this.src='https://minotar.net/helm/${enc(leader.username)}/50'">
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:15px;font-weight:700">${esc(leader.username)} ${leader.rpTier?rpTierBadge(leader.rpTier):''}</div>
+                    <div style="font-size:12px;color:var(--blue);margin-top:2px">#${lrank} в рейтинге · ${Number(leader.points).toLocaleString('ru')} очков</div>
+                    ${leader.character?`<div style="font-size:11.5px;color:var(--muted);margin-top:1px">${esc(leader.character)}</div>`:''}
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+        </div>` : ''}
+
+        <!-- Holdings -->
+        ${holdings.length ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .1s both">
+            <h3 style="margin-bottom:10px">🏰 Владения</h3>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${holdings.map(hld=>holdingChipHTML(hld)).join('')}
+            </div>
+        </div>` : ''}
+
+        <!-- Members -->
+        <div class="profile-section" style="animation:fadeUp .3s ease .15s both">
+            <h3 style="margin-bottom:6px">👤 Участники</h3>
+            ${membersHTML}
+        </div>`;
+
+    switchView('houseDetail');
+    const hdc = document.getElementById('houseDetailContent');
+    hdc.style.animation = 'none'; void hdc.offsetWidth;
+    hdc.style.animation = 'slideRight .35s cubic-bezier(.25,.46,.45,.94) both';
+    animCount('_hPts', h.total);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ═══════════════ FACTION DETAIL VIEW ═══════════════
+
+function openFactionDetail(regionId) {
+    currentEntityTab = 'factions';
+    const factions = buildFactionStats();
+    const sorted   = getSorted();
+    const fIdx     = factions.findIndex(f => f.region.id === regionId);
+    if (fIdx < 0) return;
+    const f      = factions[fIdx];
+    const rank   = fIdx + 1;
+    const bClass = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'def';
+
+    // Members list (all direct faction members)
+    const fMembers = [...f.members].sort((a,b)=>(b.points||0)-(a.points||0));
+    const membersHTML = fMembers.map(m => {
+        const mr    = sorted.indexOf(m)+1;
+        const roles = getPlayerLeaderRoles(m.id);
+        const isLdr = f.leader && m.id === f.leader.id;
+        return `<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;border-radius:8px;padding-left:4px;padding-right:4px"
+            onclick="closeEntityDetail();openDetail(${m.id})"
+            onmouseenter="this.style.background='var(--card-hover)'"
+            onmouseleave="this.style.background='transparent'">
+            <div style="font-size:13px;font-weight:800;color:${mr<=3?'#f5c842':'var(--muted)'};min-width:26px;text-align:center">#${mr}</div>
+            <img src="https://mc-heads.net/avatar/${enc(m.username)}/36" style="width:36px;height:36px;border-radius:7px;flex-shrink:0" onerror="this.src='https://minotar.net/helm/${enc(m.username)}/36'">
+            <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700">${esc(m.username)} ${m.rpTier?rpTierBadge(m.rpTier):''} ${isLdr?'<span style="font-size:10.5px;background:rgba(212,160,23,.15);color:#e6b84a;border:1px solid rgba(212,160,23,.3);border-radius:5px;padding:1px 6px">⚔️ Лидер</span>':''}</div>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:1px">${m.house?'🏠 '+esc(m.house):''}${m.character?' · '+esc(m.character):''}${roles.length?' · '+roles.map(r=>r.icon+' '+r.name).join(', '):''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:13px;font-weight:700">${Number(m.points).toLocaleString('ru')}</div>
+                <div style="font-size:10.5px;color:var(--muted)">очков</div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </div>`;
+    }).join('');
+
+    // Houses within this faction
+    const housesHTML = f.fHouses.length ? f.fHouses.map((h,hi) => {
+        const hLeadId = houseLeaders[h.name];
+        const hLead   = hLeadId ? players.find(p=>p.id==hLeadId) : h.members[0];
+        const hRank   = hi+1;
+        const hBClass = hRank===1?'gold':hRank===2?'silver':hRank===3?'bronze':'';
+        return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;border-radius:8px;padding-left:4px;padding-right:4px"
+            data-house="${esc(h.name)}" onclick="closeEntityDetail();openHouseDetail(this.dataset.house)"
+            onmouseenter="this.style.background='var(--card-hover)'"
+            onmouseleave="this.style.background='transparent'">
+            <div class="rank-badge ${hBClass}" style="width:32px;height:32px;font-size:13px">${hRank}</div>
+            <div style="font-size:22px;flex-shrink:0">🏠</div>
+            <div style="flex:1;min-width:0">
+                <div style="font-size:13.5px;font-weight:700">${esc(h.name)}</div>
+                <div style="font-size:11.5px;color:var(--muted)">${h.members.length} участников${hLead?' · ⚔️ '+esc(hLead.username):''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:13px;font-weight:700">${Number(h.total).toLocaleString('ru')}</div>
+                <div style="font-size:10.5px;color:var(--muted)">очков</div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </div>`;
+    }).join('') : `<div style="font-size:13px;color:var(--muted);padding:10px 0;font-style:italic">Нет домов в этой фракции</div>`;
+
+    document.getElementById('factionDetailContent').innerHTML = `
+        <!-- Header -->
+        <div style="display:flex;gap:24px;align-items:flex-start;margin-bottom:28px">
+            <div style="position:relative;flex-shrink:0">
+                <div style="width:90px;height:90px;background:linear-gradient(135deg,${f.rd.color}44,${f.rd.color}11);border:2px solid ${f.rd.strokeColor}55;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:46px">${f.rd.emoji}</div>
+                <div class="profile-rank-ovl ${bClass}" style="font-size:15px">${rank}</div>
+            </div>
+            <div style="flex:1;min-width:0;padding-top:4px">
+                <div style="font-size:26px;font-weight:800;letter-spacing:-.4px;margin-bottom:5px">${esc(f.rd.name)}</div>
+                <div style="font-size:13px;color:var(--muted2);margin-bottom:10px">🏰 ${esc(f.rd.capital)} · ${esc(f.rd.house)}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <span style="background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.25);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--blue)">👥 ${f.members.length} участников</span>
+                    ${f.fHouses.length?`<span style="background:rgba(163,113,247,.1);border:1px solid rgba(163,113,247,.25);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--purple)">🏠 ${f.fHouses.length} домов</span>`:''}
+                    ${f.holdings.length?`<span style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:6px;padding:3px 10px;font-size:12px;color:#e6b84a">🏰 ${f.holdings.length} владений</span>`:''}
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">
+            <div class="stat-box"><div class="stat-lbl">Место</div><div class="stat-val">#${rank}</div></div>
+            <div class="stat-box"><div class="stat-lbl">Очков</div><div class="stat-val" id="_fPts">0</div></div>
+            <div class="stat-box"><div class="stat-lbl">Участников</div><div class="stat-val">${f.members.length}</div></div>
+        </div>
+
+        <!-- Leader -->
+        ${f.leader ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .05s both">
+            <h3 style="margin-bottom:12px">⚔️ Лидер фракции</h3>
+            <div style="display:flex;align-items:center;gap:14px;cursor:pointer;border-radius:10px;padding:8px;margin:-8px;transition:background .15s"
+                onclick="closeEntityDetail();openDetail(${f.leader.id})"
+                onmouseenter="this.style.background='var(--card-hover)'"
+                onmouseleave="this.style.background='transparent'">
+                <img src="https://mc-heads.net/avatar/${enc(f.leader.username)}/50"
+                     style="width:50px;height:50px;border-radius:10px;flex-shrink:0"
+                     onerror="this.src='https://minotar.net/helm/${enc(f.leader.username)}/50'">
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:15px;font-weight:700">${esc(f.leader.username)} ${f.leader.rpTier?rpTierBadge(f.leader.rpTier):''}</div>
+                    <div style="font-size:12px;color:var(--blue);margin-top:2px">#${f.lrank} в рейтинге · ${Number(f.leader.points).toLocaleString('ru')} очков</div>
+                    ${f.leader.character?`<div style="font-size:11.5px;color:var(--muted);margin-top:1px">${esc(f.leader.character)}</div>`:''}
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+        </div>` : ''}
+
+        <!-- Holdings -->
+        ${f.holdings.length ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .08s both">
+            <h3 style="margin-bottom:10px">🏰 Владения</h3>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${f.holdings.map(hld=>holdingChipHTML(hld)).join('')}
+            </div>
+        </div>` : ''}
+
+        <!-- Houses -->
+        ${f.fHouses.length ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .11s both">
+            <h3 style="margin-bottom:6px">🏠 Дома</h3>
+            ${housesHTML}
+        </div>` : ''}
+
+        <!-- All members -->
+        ${f.members.length ? `
+        <div class="profile-section" style="animation:fadeUp .3s ease .14s both">
+            <h3 style="margin-bottom:6px">👤 Участники</h3>
+            ${membersHTML}
+        </div>` : ''}`;
+
+    switchView('factionDetail');
+    const fdc = document.getElementById('factionDetailContent');
+    fdc.style.animation = 'none'; void fdc.offsetWidth;
+    fdc.style.animation = 'slideRight .35s cubic-bezier(.25,.46,.45,.94) both';
+    animCount('_fPts', f.total);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function buildRankChart(history) {
@@ -1391,6 +2117,86 @@ function renderAdmin() {
                         </div>`;
                     }).join('')}
                 </div>
+            </div>
+
+            <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+                <div class="admin-header" style="margin-bottom:14px">
+                    <h3>⚔️ Лидеры домов</h3>
+                </div>
+                ${(() => {
+                    const allHouses = [...new Set(players.filter(p=>p.house).map(p=>p.house.trim()))].sort();
+                    if (!allHouses.length) return `<div style="font-size:12.5px;color:var(--muted);padding:8px">Дома появятся после назначения игрокам поля «Дом»</div>`;
+                    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    ${allHouses.map(hname => {
+                        const hMembers = players.filter(p=>p.house&&p.house.trim()===hname);
+                        const currentLdr = houseLeaders[hname] || '';
+                        const opts = `<option value="">— авто (по очкам) —</option>` +
+                            hMembers.map(p=>`<option value="${p.id}" ${p.id==currentLdr?'selected':''}>${esc(p.username)}</option>`).join('');
+                        return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px">
+                            <div style="font-size:11.5px;font-weight:700;margin-bottom:7px">🏠 ${esc(hname)}</div>
+                            <select style="width:100%;background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:Inter,sans-serif;font-size:12px;padding:5px 8px;outline:none"
+                                onchange="if(this.value){houseLeaders['${hname}']=parseInt(this.value)}else{delete houseLeaders['${hname}']};saveHouseLeaders()">
+                                ${opts}
+                            </select>
+                        </div>`;
+                    }).join('')}
+                    </div>`;
+                })()}
+            </div>
+
+            <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+                <div class="admin-header" style="margin-bottom:14px">
+                    <h3>🎨 Карта — настройки регионов</h3>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    ${MAP_REGIONS.map(region => {
+                        const custom = regionCustom[region.id] || {};
+                        const house   = custom.house   ?? region.house;
+                        const capital = custom.capital ?? region.capital;
+                        // stroke color as hex for color picker (derive base color)
+                        const baseColor = custom.color || region.color;
+                        // convert to 6-digit hex for input[type=color]
+                        const toHex = c => {
+                            const tmp = document.createElement('div');
+                            tmp.style.color = c;
+                            document.body.appendChild(tmp);
+                            const computed = getComputedStyle(tmp).color;
+                            document.body.removeChild(tmp);
+                            const m = computed.match(/\d+/g);
+                            if (!m) return '#111111';
+                            return '#' + m.slice(0,3).map(v => parseInt(v).toString(16).padStart(2,'0')).join('');
+                        };
+                        return `<details style="background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px">
+                            <summary style="font-size:12px;font-weight:700;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px">
+                                <span style="font-size:16px">${region.emoji}</span>
+                                <span>${region.name}</span>
+                                <span style="margin-left:auto;font-size:10.5px;color:var(--muted);font-weight:400">${house}</span>
+                            </summary>
+                            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+                                <div>
+                                    <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Название дома</label>
+                                    <input value="${esc(house)}" placeholder="${esc(region.house)}"
+                                        style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:Inter,sans-serif;font-size:12px;padding:6px 9px;outline:none"
+                                        oninput="regionCustom['${region.id}']={...(regionCustom['${region.id}']||{}),house:this.value||undefined};saveRegionsConfig();showRegionPopup.activeId&&showRegionPopup(showRegionPopup.activeId)">
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Столица</label>
+                                    <input value="${esc(capital)}" placeholder="${esc(region.capital)}"
+                                        style="width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:Inter,sans-serif;font-size:12px;padding:6px 9px;outline:none"
+                                        oninput="regionCustom['${region.id}']={...(regionCustom['${region.id}']||{}),capital:this.value||undefined};saveRegionsConfig()">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:10px">
+                                    <label style="font-size:11px;color:var(--muted)">Цвет региона</label>
+                                    <input type="color" value="${baseColor.length===7?baseColor:'#111827'}"
+                                        style="width:36px;height:28px;border:none;border-radius:5px;background:none;cursor:pointer;padding:0"
+                                        oninput="regionCustom['${region.id}']={...(regionCustom['${region.id}']||{}),color:this.value};saveRegionsConfig();updateRegionColors()">
+                                    <button onclick="delete regionCustom['${region.id}'];saveRegionsConfig();updateRegionColors();renderAdmin()"
+                                        style="font-size:11px;color:var(--muted);background:none;border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer">Сброс</button>
+                                </div>
+                            </div>
+                        </details>`;
+                    }).join('')}
+                </div>
             </div>`;
     }
 }
@@ -1454,6 +2260,34 @@ function openEdit(id) {
             <label>Биография</label>
             <textarea id="e_bio" rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:9px 13px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;outline:none;resize:vertical;transition:border-color .2s" onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border2)'">${esc(p?.bio||'')}</textarea>
         </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:4px 0 12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⚔️ RP / Фракция</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Персонаж (RP-имя)</label>
+                <input id="e_char" value="${esc(p?.character||'')}" placeholder="Например: Джон Сноу">
+            </div>
+            <div class="form-group">
+                <label>RP Tier <span style="color:var(--muted);font-weight:400">(1 лучший)</span></label>
+                <select id="e_tier" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:9px 13px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;outline:none">
+                    <option value="">— не задан —</option>
+                    ${[1,2,3,4,5].map(t=>`<option value="${t}" ${(p?.rpTier==t)?'selected':''}>${t} · ${RP_TIER_LABELS[t]}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Фракция</label>
+                <select id="e_faction" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:9px 13px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;outline:none">
+                    <option value="">— не выбрана —</option>
+                    ${MAP_REGIONS.map(r=>`<option value="${r.id}" ${(p?.factionId===r.id)?'selected':''}>${r.emoji} ${r.name}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Дом</label>
+                <input id="e_house" value="${esc(p?.house||'')}" placeholder="Например: Старки">
+            </div>
+        </div>
         <div class="btn-row">
             <button class="btn btn-ghost" onclick="closeOverlay('editOverlay')">Отмена</button>
             <button class="btn btn-primary" onclick="saveEdit()">Сохранить</button>
@@ -1466,15 +2300,20 @@ function saveEdit() {
     const title    = document.getElementById('e_title').value.trim();
     if (!username || !title) { alert('Заполните обязательные поля (ник и титул)!'); return; }
 
+    const tierVal = document.getElementById('e_tier').value;
     const data = {
         username,
         title,
-        subtitle: document.getElementById('e_sub').value.trim(),
-        points:   parseInt(document.getElementById('e_pts').value) || 0,
-        tag:      document.getElementById('e_tag').value.trim().toUpperCase(),
-        tagColor: document.getElementById('e_color').value,
-        attrs:    parseAttrs(document.getElementById('e_attrs').value),
-        bio:      document.getElementById('e_bio').value.trim(),
+        subtitle:  document.getElementById('e_sub').value.trim(),
+        points:    parseInt(document.getElementById('e_pts').value) || 0,
+        tag:       document.getElementById('e_tag').value.trim().toUpperCase(),
+        tagColor:  document.getElementById('e_color').value,
+        attrs:     parseAttrs(document.getElementById('e_attrs').value),
+        bio:       document.getElementById('e_bio').value.trim(),
+        character: document.getElementById('e_char').value.trim(),
+        factionId: document.getElementById('e_faction').value || null,
+        house:     document.getElementById('e_house').value.trim(),
+        rpTier:    tierVal ? parseInt(tierVal) : null,
     };
 
     const today = new Date().toLocaleDateString('ru-RU');
@@ -1603,6 +2442,19 @@ function animCount(id, target, duration = 900) {
         if (p < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
+}
+
+// Renders a clickable "holding" chip that navigates to the map
+function holdingChipHTML(hld) {
+    const onclick = hld.type === 'region'
+        ? `navigateMapToRegion('${hld.id}')`
+        : `navigateMapToCity('${hld.id}')`;
+    return `<span onclick="${onclick}"
+        title="Открыть на карте"
+        style="display:inline-flex;align-items:center;gap:5px;background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:6px;padding:4px 10px;font-size:12px;color:#e6b84a;cursor:pointer;transition:background .15s,border-color .15s"
+        onmouseenter="this.style.background='rgba(212,160,23,.2)';this.style.borderColor='rgba(212,160,23,.5)'"
+        onmouseleave="this.style.background='rgba(212,160,23,.1)';this.style.borderColor='rgba(212,160,23,.25)'"
+        >${esc(hld.label)} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;opacity:.7"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></span>`;
 }
 
 function parseAttrs(str) {
@@ -1814,9 +2666,10 @@ function renderMap() {
             if (!svgId) return;
             const el = _mapSvgEl.querySelector('#' + svgId);
             if (!el) return;
+            const r = getRegionData(region.id);
             const paths = el.tagName.toLowerCase() === 'g' ? el.querySelectorAll('path') : [el];
             paths.forEach(p => {
-                p.style.fill = region.color;
+                p.style.fill = r.color;
                 p.style.transition = 'fill .18s ease';
             });
             el.style.cursor = 'pointer';
@@ -1916,9 +2769,10 @@ function renderMap() {
 }
 
 function _hoverEl(el, region, on) {
+    const r = getRegionData(region.id);
     const paths = el.tagName.toLowerCase() === 'g' ? el.querySelectorAll('path') : [el];
     paths.forEach(p => {
-        p.style.fill   = on ? region.hoverColor : region.color;
+        p.style.fill   = on ? r.hoverColor : r.color;
         p.style.filter = on ? 'brightness(1.4) drop-shadow(0 0 14px rgba(88,166,255,0.45))' : 'none';
     });
 }
@@ -2073,6 +2927,31 @@ function _setupPanZoom(wrapper, svg) {
     btnWrap.appendChild(mkBtn('−', () => { scale = Math.max(initScale * 0.9, scale / 1.2); apply(); }));
     btnWrap.appendChild(mkBtn('⌂', () => { scale = initScale; tx = initTx; ty = initTy; apply(); }));
     wrapper.appendChild(btnWrap);
+
+    // ── Expose animated navigation (used by holding chips) ──────────────────
+    // svgX, svgY = coordinates in SVG viewBox space; targetZoom = desired CSS scale
+    _mapNavFn = (svgX, svgY, targetZoom, onDone) => {
+        const cw       = wrapper.clientWidth  || window.innerWidth;
+        const ch       = wrapper.clientHeight || window.innerHeight;
+        const toScale  = Math.min(6, Math.max(initScale * 0.9, targetZoom));
+        const toTx     = cw / 2 - (contentX + svgX * meetScale) * toScale;
+        const toTy     = ch / 2 - (contentY + svgY * meetScale) * toScale;
+        const fromScale = scale, fromTx = tx, fromTy = ty;
+        const dur  = 720;
+        const t0   = performance.now();
+        const ease = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2; // easeInOutCubic
+        const step = now => {
+            const t = Math.min((now - t0) / dur, 1);
+            const e = ease(t);
+            scale = fromScale + (toScale - fromScale) * e;
+            tx    = fromTx    + (toTx    - fromTx   ) * e;
+            ty    = fromTy    + (toTy    - fromTy   ) * e;
+            apply();
+            if (t < 1) requestAnimationFrame(step);
+            else if (onDone) onDone();
+        };
+        requestAnimationFrame(step);
+    };
 }
 
 function toggleMapLegend() {
@@ -2083,11 +2962,74 @@ function toggleMapLegend() {
     toggle.style.opacity = isOpen ? '1' : '0.5';
 }
 
+// ── Programmatic map navigation ───────────────────────────────────────────────
+function _goToMap(svgX, svgY, zoom, popupFn) {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'map'));
+    switchView('map');
+    closeRegionPopup(); closeCityPopup();
+    const attempt = (tries) => {
+        if (_mapNavFn && _mapSvgEl) {
+            _mapNavFn(svgX, svgY, zoom, () => { if (popupFn) popupFn(); });
+        } else if (tries > 0) {
+            setTimeout(() => attempt(tries - 1), 80);
+        }
+    };
+    setTimeout(() => attempt(10), 60);
+}
+
+function navigateMapToRegion(regionId) {
+    const getCenter = () => {
+        const svgId = SVG_ID_MAP[regionId];
+        const el = svgId && _mapSvgEl ? _mapSvgEl.querySelector('#' + svgId) : null;
+        if (el) {
+            try {
+                const bb = el.getBBox();
+                return { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
+            } catch(e) {}
+        }
+        return null;
+    };
+    const go = () => {
+        const c = getCenter();
+        if (c) {
+            _goToMap(c.x, c.y, 3.2, () => {
+                showRegionPopup(regionId, window.innerWidth / 2, window.innerHeight / 2);
+            });
+        } else {
+            _goToMap(1540, 2700, 2.0);
+        }
+    };
+    // Switch to map first, then compute center after SVG is in DOM
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'map'));
+    switchView('map');
+    closeRegionPopup(); closeCityPopup();
+    const attempt = (tries) => {
+        const c = getCenter();
+        if (c && _mapNavFn) {
+            _mapNavFn(c.x, c.y, 3.2, () => {
+                showRegionPopup(regionId, window.innerWidth / 2, window.innerHeight / 2);
+            });
+        } else if (tries > 0) {
+            setTimeout(() => attempt(tries - 1), 80);
+        }
+    };
+    setTimeout(() => attempt(15), 60);
+}
+
+function navigateMapToCity(cityId) {
+    const city = MAP_CITIES.find(c => c.id === cityId);
+    if (!city) return;
+    _goToMap(city.x, city.y, 4.5, () => {
+        showCityPopup(cityId, window.innerWidth / 2, window.innerHeight / 2);
+    });
+}
+
 function buildMapLegend() {
     const el = document.getElementById('mapLegend');
     if (!el) return;
     const sorted = getSorted();
-    el.innerHTML = MAP_REGIONS.map(r => {
+    el.innerHTML = MAP_REGIONS.map(region => {
+        const r = getRegionData(region.id);
         const leader = mapData[r.id] ? players.find(p => p.id == mapData[r.id]) : null;
         const rank = leader ? sorted.indexOf(leader) + 1 : null;
         return `<div class="map-legend-item"
@@ -2130,7 +3072,7 @@ function clickRegionById(id) {
 }
 
 function showRegionPopup(id, cx, cy) {
-    const r = MAP_REGIONS.find(x => x.id === id);
+    const r = getRegionData(id);
     if (!r) return;
     const popup  = document.getElementById('regionPopup');
     const sorted = getSorted();
@@ -2335,7 +3277,7 @@ function showCityPopup(id, cx, cy) {
     const leader = leaderId ? players.find(p => p.id == leaderId) : null;
     const rank   = leader ? sorted.indexOf(leader) + 1 : null;
 
-    const region = MAP_REGIONS.find(r => r.id === city.regionId);
+    const region = getRegionData(city.regionId);
 
     const leaderHTML = leader
         ? `<div class="rp-leader" onclick="closeCityPopup();switchView('profile');openDetail(${leader.id})">
@@ -2358,9 +3300,9 @@ function showCityPopup(id, cx, cy) {
     popup.innerHTML = `
         <button class="rp-close" onclick="closeCityPopup()">✕</button>
         <div class="rp-header">
-            <div class="rp-house">${city.isCapital ? '👑' : '🏙'} ${city.name}</div>
-            <div class="rp-name">${region ? region.name : ''}</div>
-            <div class="rp-capital">${city.isCapital ? '🏰 Столица' : '🗡 Город'}</div>
+            <div class="rp-house">${region ? region.emoji + ' ' + region.house : ''}</div>
+            <div class="rp-name">${city.name}</div>
+            <div class="rp-capital">${city.isCapital ? '👑 Столица · ' + region.name : '🏙 Город · ' + (region ? region.name : '')}</div>
         </div>
         <hr class="rp-divider">
         <div class="rp-section-label">Лидер города</div>
