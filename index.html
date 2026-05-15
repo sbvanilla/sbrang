@@ -270,7 +270,7 @@
             align-items: center;
             justify-content: center;
             padding: 20px;
-            z-index: 500;
+            z-index: 10002;
             opacity: 0;
             pointer-events: none;
             transition: opacity .2s;
@@ -409,6 +409,18 @@
         /* no results */
         .no-res { text-align: center; padding: 50px 20px; color: var(--muted); font-size: 13.5px; }
 
+        /* family tree animations */
+        @keyframes treeNodeIn {
+            from { opacity: 0; transform: scale(.84) translateY(16px); }
+            to   { opacity: 1; transform: none; }
+        }
+        @keyframes treeLineIn {
+            from { stroke-dashoffset: 1; opacity: 0; }
+            to   { stroke-dashoffset: 0; opacity: 1; }
+        }
+        .tree-node-card { animation: treeNodeIn .42s cubic-bezier(.22,.68,0,1.2) both; }
+        .tree-line-path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: treeLineIn .55s ease both; }
+
         /* admin fab */
         .fab {
             position: fixed;
@@ -426,7 +438,7 @@
             justify-content: center;
             font-size: 18px;
             transition: all .2s;
-            z-index: 100;
+            z-index: 10001;
         }
         .fab:hover { border-color: var(--blue); color: var(--blue); box-shadow: 0 0 18px rgba(88,166,255,.2); }
 
@@ -509,6 +521,15 @@
         @keyframes fadeIn      { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         @keyframes fadeUp      { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
         @keyframes slideRight  { from{opacity:0;transform:translateX(36px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes ftModalIn   { from{opacity:0;transform:scale(.97) translateY(18px)} to{opacity:1;transform:none} }
+        @keyframes ftModalOut  { from{opacity:1;transform:none} to{opacity:0;transform:scale(.97) translateY(18px)} }
+        @keyframes ftHeaderIn  { from{opacity:0;transform:translateY(-14px)} to{opacity:1;transform:none} }
+        @keyframes ftContentIn { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
+
+        #familyTreeModal.ft-opening  { animation: ftModalIn  .32s cubic-bezier(.22,.68,0,1.15) both; }
+        #familyTreeModal.ft-closing  { animation: ftModalOut .22s cubic-bezier(.4,0,1,1) both; }
+        #familyTreeModal.ft-opening .ft-header  { animation: ftHeaderIn  .28s ease .06s both; }
+        #familyTreeModal.ft-opening .ft-content { animation: ftContentIn .35s ease .1s  both; }
 
         /* ─── MAP ─── */
         .map-view-wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
@@ -724,6 +745,36 @@
         <div id="houseDetailContent"></div>
     </div>
 
+    <!-- Family Tree Modal (fullscreen) -->
+    <div id="familyTreeModal" style="display:none;position:fixed;inset:0;z-index:9999;background:var(--bg);flex-direction:column">
+        <!-- Header -->
+        <div class="ft-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border2);flex-shrink:0;background:var(--card)">
+            <div style="display:flex;align-items:center;gap:10px">
+                <button onclick="closeFamilyTreeModal()" style="display:flex;align-items:center;gap:6px;background:none;border:1px solid var(--border2);cursor:pointer;color:var(--muted);padding:6px 12px;border-radius:8px;font-size:13px;transition:color .15s,border-color .15s" onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--text)'" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border2)'">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
+                    Назад
+                </button>
+                <h3 style="margin:0;font-size:17px;font-weight:700;display:flex;align-items:center;gap:7px">🌳 <span id="familyTreeModalTitle"></span></h3>
+            </div>
+            <!-- Pan/zoom controls -->
+            <div style="display:flex;align-items:center;gap:6px">
+                <button onclick="_treePZ&&_treePZ.center(true)" title="Центрировать"
+                    style="background:none;border:1px solid var(--border2);cursor:pointer;color:var(--muted);width:32px;height:32px;border-radius:8px;font-size:15px;display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s"
+                    onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--text)'" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border2)'">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+                </button>
+                <button onclick="_treePZ&&_treePZ.zoom(-1)" title="Уменьшить"
+                    style="background:none;border:1px solid var(--border2);cursor:pointer;color:var(--muted);width:32px;height:32px;border-radius:8px;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s"
+                    onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--text)'" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border2)'">−</button>
+                <button onclick="_treePZ&&_treePZ.zoom(1)" title="Увеличить"
+                    style="background:none;border:1px solid var(--border2);cursor:pointer;color:var(--muted);width:32px;height:32px;border-radius:8px;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s"
+                    onmouseenter="this.style.color='var(--text)';this.style.borderColor='var(--text)'" onmouseleave="this.style.color='var(--muted)';this.style.borderColor='var(--border2)'">+</button>
+            </div>
+        </div>
+        <!-- Tree pan/zoom viewport -->
+        <div id="familyTreeModalContent" class="ft-content" style="flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;user-select:none"></div>
+    </div>
+
     <!-- Faction detail view -->
     <div id="factionDetailView" style="display:none">
         <button class="profile-back" onclick="closeEntityDetail()">
@@ -915,7 +966,9 @@ let news         = [];
 let mapData      = {};
 let regionCustom  = {}; // { regionId: { house?, capital?, color? } }
 let houseLeaders  = {}; // { "HouseName": playerId }
+let housesData    = {}; // { "HouseName": { description, tree:{nodes[],edges[]} } }
 let _mapNavFn     = null; // set by _setupPanZoom, used for programmatic animated navigation
+let _treePZ       = null; // pan/zoom controller for family tree modal
 let currentEntityTab = 'houses'; // which entity detail we came from
 let adminIn    = false;
 let editId     = null;
@@ -943,6 +996,15 @@ function _shiftColor(hex, factor) {
 
 function saveRegionsConfig() { db.ref('mapData/regionsConfig').set(regionCustom); }
 function saveHouseLeaders()  { db.ref('mapData/houseLeaders').set(houseLeaders); }
+function saveHousesData()    { db.ref('mapData/housesData').set(housesData); }
+function getHouseData(name) {
+    if (!housesData[name]) housesData[name] = {};
+    const hd = housesData[name];
+    if (!hd.tree) hd.tree = { nodes: [], edges: [] };
+    if (!Array.isArray(hd.tree.nodes)) hd.tree.nodes = Object.values(hd.tree.nodes||{});
+    if (!Array.isArray(hd.tree.edges)) hd.tree.edges = Object.values(hd.tree.edges||{});
+    return hd;
+}
 
 function updateRegionColors() {
     if (!_mapSvgEl) return;
@@ -986,6 +1048,9 @@ db.ref('/').on('value', snap => {
     }
     if (d.mapData && d.mapData.houseLeaders) {
         houseLeaders = d.mapData.houseLeaders;
+    }
+    if (d.mapData && d.mapData.housesData) {
+        housesData = d.mapData.housesData;
     }
     if (document.querySelector('.overlay.open')) return;
     render();
@@ -1649,6 +1714,255 @@ function closeProfile() {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'rankings'));
 }
 
+// ═══════════════ FAMILY TREE RENDERER ═══════════════
+
+function renderFamilyTreeHTML(houseName) {
+    const hd    = getHouseData(houseName);
+    const nodes = hd.tree.nodes;
+    const edges = hd.tree.edges;
+    if (!nodes.length) return '';
+
+    const NW = 162, NH = 108, CS = 194, RS = 158;
+    const maxCol = Math.max(0, ...nodes.map(n => n.col || 0));
+    const maxRow = Math.max(0, ...nodes.map(n => n.row || 0));
+    const svgW   = (maxCol + 1) * CS + 20;
+    const svgH   = (maxRow + 1) * RS + 20;
+
+    const nx = n => (n.col || 0) * CS;
+    const ny = n => (n.row || 0) * RS;
+    const cx = n => nx(n) + NW / 2;
+    const cy = n => ny(n) + NH / 2;
+    const nodeMap = {};
+    nodes.forEach(n => { nodeMap[n.id] = n; });
+
+    const svgLines = edges.map((e, ei) => {
+        const a = nodeMap[e.from], b = nodeMap[e.to];
+        if (!a || !b) return '';
+        const delay = (.25 + ei * .07).toFixed(2);
+        if (e.type === 'spouse') {
+            return `<line class="tree-line-path" x1="${cx(a)}" y1="${cy(a)}" x2="${cx(b)}" y2="${cy(b)}"
+                stroke="#c8913a" stroke-width="2" stroke-dasharray="6,4" pathLength="1"
+                style="animation-delay:${delay}s" opacity=".7"/>`;
+        }
+        const x1 = cx(a), y1 = ny(a) + NH + 1;
+        const x2 = cx(b), y2 = ny(b) - 1;
+        const ym  = (y1 + y2) / 2;
+        return `<path class="tree-line-path" d="M${x1},${y1} L${x1},${ym} L${x2},${ym} L${x2},${y2}"
+            stroke="#4a8c5c" stroke-width="2" fill="none" pathLength="1"
+            style="animation-delay:${delay}s" opacity=".85"/>
+            <polygon points="${x2},${y2} ${x2-5},${y2-9} ${x2+5},${y2-9}" fill="#4a8c5c" opacity=".85"
+                style="animation:treeNodeIn .3s ease ${(+delay+.15).toFixed(2)}s both"/>`;
+    }).join('');
+
+    const nodesHTML = nodes.map((n, i) => {
+        const player = n.playerId ? players.find(p => p.id == n.playerId) : null;
+        const rank   = player ? getRank(player.id) : null;
+        const delay  = (i * .08).toFixed(2);
+        const avatar = player
+            ? `<img src="https://mc-heads.net/avatar/${enc(player.username)}/44" style="width:44px;height:44px;border-radius:9px;border:2px solid var(--border2)" onerror="this.src='https://minotar.net/helm/${enc(player.username)}/44'">`
+            : `<div style="width:44px;height:44px;border-radius:9px;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px">👤</div>`;
+        return `<div class="tree-node-card" style="position:absolute;left:${nx(n)}px;top:${ny(n)}px;width:${NW}px;
+            background:linear-gradient(160deg,var(--card2,var(--card)) 0%,var(--card) 100%);
+            border:1px solid var(--border2);border-radius:13px;padding:12px 10px 10px;
+            box-sizing:border-box;display:flex;flex-direction:column;align-items:center;
+            text-align:center;gap:4px;animation-delay:${delay}s;
+            ${player?'cursor:pointer;':''}transition:border-color .18s,transform .18s,box-shadow .18s"
+            ${player?`onclick="closeFamilyTreeModal(true);openDetail(${player.id})"
+                onmouseenter="this.style.borderColor='var(--blue)';this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(88,166,255,.18)'"
+                onmouseleave="this.style.borderColor='var(--border2)';this.style.transform='';this.style.boxShadow=''"`:''}>
+            ${avatar}
+            <div style="font-size:12.5px;font-weight:700;color:var(--text);line-height:1.3;margin-top:3px">${esc(n.name)}</div>
+            ${n.role ? `<div style="font-size:10.5px;color:#c8913a;font-weight:500">${esc(n.role)}</div>` : ''}
+            ${player ? `<div style="font-size:9.5px;color:var(--blue);font-weight:600;margin-top:1px">${esc(player.username)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `<div id="familyTreeCanvas" style="position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform">
+        <div style="position:relative;width:${svgW}px;height:${svgH}px">
+            <svg style="position:absolute;top:0;left:0;width:${svgW}px;height:${svgH}px;pointer-events:none;overflow:visible">
+                ${svgLines}
+            </svg>
+            ${nodesHTML}
+        </div>
+    </div>`;
+}
+
+function _setupTreePanZoom(container, el) {
+    // ── clean up previous instance ────────────────────────────────────────────
+    if (container._pzCleanup) container._pzCleanup();
+
+    const MIN_SCALE = 0.25, MAX_SCALE = 3;
+    let scale = 1, tx = 0, ty = 0;
+    let dragging = false, ox = 0, oy = 0, moved = false;
+    let lastDist = null;
+
+    const apply = () => {
+        el.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+    };
+
+    // centre tree in viewport (optionally animated)
+    const center = (animated) => {
+        const cw = container.clientWidth,  ch = container.clientHeight;
+        const tw = el.offsetWidth * scale,  th = el.offsetHeight * scale;
+        // if tree fits — truly center; if too big — pad 40px from top-left
+        const targetTx = tw < cw ? (cw - tw) / 2 : 40;
+        const targetTy = th < ch ? (ch - th) / 2 : 40;
+        if (!animated) { tx = targetTx; ty = targetTy; apply(); return; }
+        const fromTx = tx, fromTy = ty, dur = 380, t0 = performance.now();
+        const ease = t => t < .5 ? 2*t*t : -1+(4-2*t)*t;
+        const step = now => {
+            const t = Math.min((now-t0)/dur, 1), e = ease(t);
+            tx = fromTx + (targetTx-fromTx)*e;
+            ty = fromTy + (targetTy-fromTy)*e;
+            apply();
+            if (t < 1) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    };
+
+    // zoom step from buttons
+    const zoom = (dir) => {
+        const cw = container.clientWidth, ch = container.clientHeight;
+        const mx = cw / 2, my = ch / 2;
+        const factor = dir > 0 ? 1.25 : 0.8;
+        const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+        tx -= (mx - tx) * (ns / scale - 1);
+        ty -= (my - ty) * (ns / scale - 1);
+        scale = ns; apply();
+    };
+
+    center(false);
+
+    // ── wheel ─────────────────────────────────────────────────────────────────
+    const onWheel = e => {
+        e.preventDefault();
+        const rect = container.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.12 : 0.9;
+        const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+        tx -= (mx - tx) * (ns / scale - 1);
+        ty -= (my - ty) * (ns / scale - 1);
+        scale = ns; apply();
+    };
+
+    // ── mouse ─────────────────────────────────────────────────────────────────
+    const onMdown = e => {
+        if (e.button !== 0) return;
+        dragging = true; moved = false;
+        ox = e.clientX - tx; oy = e.clientY - ty;
+        container.style.cursor = 'grabbing';
+        e.preventDefault();
+    };
+    const onMmove = e => {
+        if (!dragging) return;
+        const dx = e.clientX - ox - tx, dy = e.clientY - oy - ty;
+        if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+        tx = e.clientX - ox; ty = e.clientY - oy; apply();
+    };
+    const onMup = () => {
+        const wasMoved = moved;
+        dragging = false;
+        moved = false; // reset immediately so future mouseups are clean
+        container.style.cursor = 'grab';
+        if (wasMoved) {
+            // eat only the very next click that belongs to this drag release
+            window.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); },
+                { once: true, capture: true });
+        }
+    };
+
+    // ── touch ─────────────────────────────────────────────────────────────────
+    const onTstart = e => {
+        if (e.touches.length === 1) {
+            dragging = true; moved = false;
+            ox = e.touches[0].clientX - tx; oy = e.touches[0].clientY - ty;
+            lastDist = null;
+        } else if (e.touches.length === 2) {
+            dragging = false;
+            lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                                  e.touches[0].clientY - e.touches[1].clientY);
+        }
+    };
+    const onTmove = e => {
+        e.preventDefault();
+        if (e.touches.length === 1 && dragging) {
+            const dx = e.touches[0].clientX - ox - tx, dy = e.touches[0].clientY - oy - ty;
+            if (Math.abs(dx)+Math.abs(dy) > 3) moved = true;
+            tx = e.touches[0].clientX - ox; ty = e.touches[0].clientY - oy; apply();
+        } else if (e.touches.length === 2 && lastDist !== null) {
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                                    e.touches[0].clientY - e.touches[1].clientY);
+            const rect = container.getBoundingClientRect();
+            const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+            const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+            const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * dist / lastDist));
+            tx -= (mx - tx) * (ns / scale - 1);
+            ty -= (my - ty) * (ns / scale - 1);
+            scale = ns; lastDist = dist; apply();
+        }
+    };
+    const onTend = () => { dragging = false; lastDist = null; container.style.cursor = 'grab'; };
+
+    container.addEventListener('wheel',      onWheel, { passive: false });
+    container.addEventListener('mousedown',  onMdown);
+    container.addEventListener('touchstart', onTstart, { passive: true });
+    container.addEventListener('touchmove',  onTmove,  { passive: false });
+    container.addEventListener('touchend',   onTend);
+    window.addEventListener('mousemove', onMmove);
+    window.addEventListener('mouseup',   onMup);
+
+    container._pzCleanup = () => {
+        container.removeEventListener('wheel',      onWheel);
+        container.removeEventListener('mousedown',  onMdown);
+        container.removeEventListener('touchstart', onTstart);
+        container.removeEventListener('touchmove',  onTmove);
+        container.removeEventListener('touchend',   onTend);
+        window.removeEventListener('mousemove', onMmove);
+        window.removeEventListener('mouseup',   onMup);
+    };
+
+    return { center, zoom };
+}
+
+function openFamilyTreeModal(houseName) {
+    const hd = getHouseData(houseName);
+    if (!hd.tree || !hd.tree.nodes || !hd.tree.nodes.length) return;
+    const modal   = document.getElementById('familyTreeModal');
+    const content = document.getElementById('familyTreeModalContent');
+    document.getElementById('familyTreeModalTitle').textContent = houseName;
+    content.innerHTML = renderFamilyTreeHTML(houseName);
+    modal.classList.remove('ft-closing', 'ft-opening');
+    modal.style.display = 'flex';
+    void modal.offsetWidth;
+    modal.classList.add('ft-opening');
+    document.body.style.overflow = 'hidden';
+    // init pan/zoom after layout is available
+    requestAnimationFrame(() => {
+        const canvas = document.getElementById('familyTreeCanvas');
+        if (canvas) _treePZ = _setupTreePanZoom(content, canvas);
+    });
+}
+
+function closeFamilyTreeModal(instant) {
+    const modal   = document.getElementById('familyTreeModal');
+    const content = document.getElementById('familyTreeModalContent');
+    if (content._pzCleanup) { content._pzCleanup(); content._pzCleanup = null; }
+    _treePZ = null;
+    if (instant) {
+        modal.style.display = 'none';
+        modal.classList.remove('ft-opening', 'ft-closing');
+        document.body.style.overflow = '';
+        return;
+    }
+    modal.classList.remove('ft-opening');
+    modal.classList.add('ft-closing');
+    modal.addEventListener('animationend', () => {
+        modal.style.display = 'none';
+        modal.classList.remove('ft-closing');
+        document.body.style.overflow = '';
+    }, { once: true });
+}
+
 // ═══════════════ HOUSE DETAIL VIEW ═══════════════
 
 function openHouseDetail(houseName) {
@@ -1741,6 +2055,25 @@ function openHouseDetail(houseName) {
                 ${holdings.map(hld=>holdingChipHTML(hld)).join('')}
             </div>
         </div>` : ''}
+
+        <!-- Description -->
+        ${(() => { const hd = getHouseData(h.name); return hd.description ? `
+        <div class="profile-section" style="margin-bottom:14px;animation:fadeUp .3s ease .12s both">
+            <h3 style="margin-bottom:10px">📜 Описание</h3>
+            <div style="font-size:14px;color:var(--muted2);line-height:1.8;white-space:pre-wrap">${esc(hd.description)}</div>
+        </div>` : ''; })()}
+
+        <!-- Family tree button -->
+        ${(() => { const hd = getHouseData(h.name); return (hd.tree && hd.tree.nodes && hd.tree.nodes.length) ? `
+        <div style="margin-bottom:14px;animation:fadeUp .3s ease .13s both">
+            <button onclick="openFamilyTreeModal('${h.name.replace(/'/g,"\\'")}')"
+                style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;background:var(--card);border:1px solid var(--border2);border-radius:12px;cursor:pointer;color:var(--text);font-size:14px;font-weight:600;transition:border-color .15s,background .15s"
+                onmouseenter="this.style.borderColor='var(--blue)';this.style.background='rgba(88,166,255,.06)'"
+                onmouseleave="this.style.borderColor='var(--border2)';this.style.background='var(--card)'">
+                🌳 Семейное древо
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+        </div>` : ''; })()}
 
         <!-- Members -->
         <div class="profile-section" style="animation:fadeUp .3s ease .15s both">
@@ -1992,6 +2325,200 @@ function hideChartTip() {
     setTimeout(() => { tt.style.display = 'none'; }, 150);
 }
 
+// ═══════════════ HOUSE TREE ADMIN ═══════════════
+
+function buildHouseTreeAdminHTML(houseName, idx) {
+    const hd  = getHouseData(houseName);
+    const nodes = hd.tree.nodes, edges = hd.tree.edges;
+    const hn    = JSON.stringify(houseName).replace(/"/g, '&quot;');
+    const iSt   = 'background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:Inter,sans-serif;font-size:12px;padding:5px 8px;outline:none;box-sizing:border-box;width:100%';
+    const houseMembers = players.filter(p => p.house && p.house.trim() === houseName);
+
+    const nodesListHTML = nodes.length ? nodes.map(n => {
+        const player = n.playerId ? players.find(p => p.id == n.playerId) : null;
+        return `<div id="tnode_row_${n.id}_${idx}" style="border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0">
+                ${player
+                    ? `<img src="https://mc-heads.net/avatar/${enc(player.username)}/24" style="width:24px;height:24px;border-radius:4px;flex-shrink:0">`
+                    : '<div style="width:24px;height:24px;border-radius:4px;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px">👤</div>'}
+                <div style="flex:1;min-width:0;font-size:12px">
+                    <span style="font-weight:600">${esc(n.name)}</span>
+                    ${n.role ? `<span style="color:var(--muted)"> · ${esc(n.role)}</span>` : ''}
+                    ${player ? `<span style="color:var(--blue)"> · ${esc(player.username)}</span>` : ''}
+                    <span style="color:var(--muted);font-size:10px"> [col:${n.col||0} row:${n.row||0}]</span>
+                </div>
+                <button data-house="${esc(houseName)}" data-id="${n.id}" data-idx="${idx}"
+                    onclick="editTreeNode(this.dataset.house,this.dataset.id,+this.dataset.idx)"
+                    style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;flex-shrink:0;line-height:1;padding:2px 4px"
+                    onmouseenter="this.style.color='var(--text)'" onmouseleave="this.style.color='var(--muted)'" title="Редактировать">✏</button>
+                <button data-house="${esc(houseName)}" data-id="${n.id}" data-idx="${idx}"
+                    onclick="removeTreeNode(this.dataset.house,this.dataset.id,+this.dataset.idx)"
+                    style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;flex-shrink:0;line-height:1;padding:2px 4px"
+                    onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--muted)'" title="Удалить">✕</button>
+            </div>
+        </div>`;
+    }).join('') : `<div style="font-size:11.5px;color:var(--muted);padding:4px 0;font-style:italic">Персонажей нет</div>`;
+
+    const edgesListHTML = edges.length ? edges.map((e, ei) => {
+        const fn = nodes.find(n => n.id === e.from), tn = nodes.find(n => n.id === e.to);
+        if (!fn || !tn) return '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px">
+            <div style="flex:1">${esc(fn.name)} → ${esc(tn.name)}</div>
+            <div style="color:var(--muted);font-size:10.5px">${e.type==='spouse'?'💑 Супруги':'👨‍👧 Родитель→Ребёнок'}</div>
+            <button data-house="${esc(houseName)}" data-ei="${ei}" data-idx="${idx}"
+                onclick="removeTreeEdge(this.dataset.house,+this.dataset.ei,+this.dataset.idx)"
+                style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;flex-shrink:0;line-height:1"
+                onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--muted)'">✕</button>
+        </div>`;
+    }).join('') : `<div style="font-size:11.5px;color:var(--muted);padding:4px 0;font-style:italic">Связей нет</div>`;
+
+    const nodeOpts = nodes.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join('');
+
+    return `
+        <div style="margin-bottom:12px">
+            <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Описание</div>
+            <textarea rows="3" style="${iSt};resize:vertical"
+                oninput="getHouseData(${hn}).description=this.value;saveHousesData()">${esc(hd.description||'')}</textarea>
+        </div>
+
+        <div style="margin-bottom:12px">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🌳 Персонажи древа</div>
+            <div style="margin-bottom:8px">${nodesListHTML}</div>
+            <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:7px">
+                <div style="font-size:11px;color:var(--muted);font-weight:600">Добавить персонажа</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                    <input id="tn_name_${idx}" placeholder="Имя персонажа *" style="${iSt}">
+                    <input id="tn_role_${idx}" placeholder="Роль (Лорд, Леди…)" style="${iSt}">
+                </div>
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;align-items:center">
+                    <select id="tn_player_${idx}" style="${iSt}"><option value="">— без игрока —</option>${houseMembers.map(p=>`<option value="${p.id}">${esc(p.username)}</option>`).join('')}</select>
+                    <div style="display:flex;align-items:center;gap:5px">
+                        <span style="font-size:10.5px;color:var(--muted);white-space:nowrap">Колонка</span>
+                        <input id="tn_col_${idx}" type="number" value="0" min="0" style="${iSt}">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px">
+                        <span style="font-size:10.5px;color:var(--muted);white-space:nowrap">Строка</span>
+                        <input id="tn_row_${idx}" type="number" value="0" min="0" style="${iSt}">
+                    </div>
+                </div>
+                <button onclick="addTreeNode(${hn},${idx})" style="background:var(--green);border:none;border-radius:6px;color:#fff;font-family:Inter,sans-serif;font-size:12px;font-weight:600;cursor:pointer;padding:7px">+ Добавить персонажа</button>
+            </div>
+        </div>
+
+        ${nodes.length >= 2 ? `
+        <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🔗 Связи</div>
+            <div style="margin-bottom:8px">${edgesListHTML}</div>
+            <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:8px;padding:10px">
+                <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:7px">Добавить связь</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;align-items:center">
+                    <select id="te_from_${idx}" style="${iSt}">${nodeOpts}</select>
+                    <select id="te_to_${idx}"   style="${iSt}">${nodeOpts}</select>
+                    <select id="te_type_${idx}" style="${iSt}">
+                        <option value="parent">Родитель→Ребёнок</option>
+                        <option value="spouse">Супруги</option>
+                    </select>
+                    <button onclick="addTreeEdge(${hn},${idx})" style="background:var(--blue);border:none;border-radius:6px;color:#fff;font-family:Inter,sans-serif;font-size:12px;font-weight:600;cursor:pointer;padding:7px 12px">+</button>
+                </div>
+            </div>
+        </div>` : ''}`;
+}
+
+function refreshHouseTreeSection(houseName, idx) {
+    const el = document.getElementById('htreeInner_' + idx);
+    if (el) el.innerHTML = buildHouseTreeAdminHTML(houseName, idx);
+}
+
+function addTreeNode(houseName, idx) {
+    const name = (document.getElementById('tn_name_'+idx)||{}).value?.trim();
+    if (!name) { alert('Введите имя персонажа'); return; }
+    const hd = getHouseData(houseName);
+    hd.tree.nodes.push({
+        id:       'n_' + Date.now(),
+        name,
+        role:     (document.getElementById('tn_role_'+idx)||{}).value?.trim() || '',
+        playerId: parseInt((document.getElementById('tn_player_'+idx)||{}).value) || null,
+        col:      parseInt((document.getElementById('tn_col_'+idx)||{}).value)    || 0,
+        row:      parseInt((document.getElementById('tn_row_'+idx)||{}).value)    || 0,
+    });
+    saveHousesData();
+    refreshHouseTreeSection(houseName, idx);
+}
+
+function removeTreeNode(houseName, nodeId, idx) {
+    const hd = getHouseData(houseName);
+    hd.tree.nodes = hd.tree.nodes.filter(n => n.id !== nodeId);
+    hd.tree.edges = hd.tree.edges.filter(e => e.from !== nodeId && e.to !== nodeId);
+    saveHousesData();
+    refreshHouseTreeSection(houseName, idx);
+}
+
+function editTreeNode(houseName, nodeId, idx) {
+    const hd = getHouseData(houseName);
+    const n  = hd.tree.nodes.find(nd => nd.id === nodeId);
+    if (!n) return;
+    const houseMembers = players.filter(p => p.house && p.house.trim() === houseName);
+    const hn = JSON.stringify(houseName).replace(/"/g, '&quot;');
+    const iSt = 'background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:Inter,sans-serif;font-size:12px;padding:5px 8px;outline:none;box-sizing:border-box;width:100%';
+    const rowEl = document.getElementById(`tnode_row_${nodeId}_${idx}`);
+    if (!rowEl) return;
+    rowEl.innerHTML = `
+        <div style="padding:8px 4px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <input id="te_name_${nodeId}" value="${esc(n.name)}" placeholder="Имя *" style="${iSt}">
+                <input id="te_role_${nodeId}" value="${esc(n.role||'')}" placeholder="Роль" style="${iSt}">
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px">
+                <select id="te_player_${nodeId}" style="${iSt}">
+                    <option value="">— без игрока —</option>
+                    ${houseMembers.map(p => `<option value="${p.id}" ${p.id==n.playerId?'selected':''}>${esc(p.username)}</option>`).join('')}
+                </select>
+                <input id="te_col_${nodeId}" type="number" value="${n.col||0}" min="0" placeholder="Кол." style="${iSt}">
+                <input id="te_row_${nodeId}" type="number" value="${n.row||0}" min="0" placeholder="Ряд" style="${iSt}">
+            </div>
+            <div style="display:flex;gap:6px">
+                <button onclick="saveTreeNode(${hn},'${nodeId}',${idx})"
+                    style="flex:1;background:var(--green);border:none;border-radius:6px;color:#fff;font-family:Inter,sans-serif;font-size:12px;font-weight:600;cursor:pointer;padding:6px">Сохранить</button>
+                <button onclick="refreshHouseTreeSection(${hn},${idx})"
+                    style="background:none;border:1px solid var(--border2);border-radius:6px;color:var(--muted);font-family:Inter,sans-serif;font-size:12px;cursor:pointer;padding:6px 12px">Отмена</button>
+            </div>
+        </div>`;
+}
+
+function saveTreeNode(houseName, nodeId, idx) {
+    const hd = getHouseData(houseName);
+    const n  = hd.tree.nodes.find(nd => nd.id === nodeId);
+    if (!n) return;
+    const name = document.getElementById(`te_name_${nodeId}`)?.value?.trim();
+    if (!name) { alert('Введите имя персонажа'); return; }
+    n.name     = name;
+    n.role     = document.getElementById(`te_role_${nodeId}`)?.value?.trim() || '';
+    n.playerId = parseInt(document.getElementById(`te_player_${nodeId}`)?.value) || null;
+    n.col      = parseInt(document.getElementById(`te_col_${nodeId}`)?.value)    || 0;
+    n.row      = parseInt(document.getElementById(`te_row_${nodeId}`)?.value)    || 0;
+    saveHousesData();
+    refreshHouseTreeSection(houseName, idx);
+}
+
+function addTreeEdge(houseName, idx) {
+    const from = (document.getElementById('te_from_'+idx)||{}).value;
+    const to   = (document.getElementById('te_to_'+idx)||{}).value;
+    const type = (document.getElementById('te_type_'+idx)||{}).value;
+    if (!from || !to || from === to) { alert('Выберите двух разных персонажей'); return; }
+    const hd = getHouseData(houseName);
+    if (hd.tree.edges.some(e => e.from===from && e.to===to)) { alert('Такая связь уже существует'); return; }
+    hd.tree.edges.push({ from, to, type });
+    saveHousesData();
+    refreshHouseTreeSection(houseName, idx);
+}
+
+function removeTreeEdge(houseName, edgeIdx, sectionIdx) {
+    const hd = getHouseData(houseName);
+    hd.tree.edges.splice(edgeIdx, 1);
+    saveHousesData();
+    refreshHouseTreeSection(houseName, sectionIdx);
+}
+
 // ═══════════════ ADMIN ═══════════════
 
 function openAdmin() { renderAdmin(); openOverlay('adminOverlay'); }
@@ -2141,6 +2668,31 @@ function renderAdmin() {
                         </div>`;
                     }).join('')}
                     </div>`;
+                })()}
+            </div>
+
+            <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+                <div class="admin-header" style="margin-bottom:14px">
+                    <h3>📜 Дома — описание и семейное древо</h3>
+                </div>
+                ${(() => {
+                    const allHouses = [...new Set(players.filter(p=>p.house).map(p=>p.house.trim()))].sort();
+                    if (!allHouses.length) return `<div style="font-size:12.5px;color:var(--muted);padding:8px 0">Дома появятся после назначения игрокам поля «Дом»</div>`;
+                    return allHouses.map((hname, idx) => {
+                        const hd = getHouseData(hname);
+                        const hasDesc = !!(hd.description && hd.description.trim());
+                        const nodeCount = (hd.tree && hd.tree.nodes) ? hd.tree.nodes.length : 0;
+                        return `<details style="background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px">
+                            <summary style="font-size:12.5px;font-weight:700;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px">
+                                <span>🏠 ${esc(hname)}</span>
+                                ${hasDesc ? '<span style="font-size:10px;background:rgba(63,185,80,.15);color:var(--green);border-radius:4px;padding:1px 5px">📜 Описание</span>' : ''}
+                                ${nodeCount ? `<span style="font-size:10px;background:rgba(88,166,255,.15);color:var(--blue);border-radius:4px;padding:1px 5px">🌳 ${nodeCount} персонажей</span>` : ''}
+                            </summary>
+                            <div id="htreeInner_${idx}" style="margin-top:12px">
+                                ${buildHouseTreeAdminHTML(hname, idx)}
+                            </div>
+                        </details>`;
+                    }).join('');
                 })()}
             </div>
 
